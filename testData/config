@@ -1,0 +1,14 @@
+{
+   "LmsIP":"10.10.0.1:9090",
+   "WebPort":"8005",
+   "Zones":{
+      "Zone1":{
+         "AlsaName":"GarageMusic",
+         "MAC":"00:01:02:03:04:05"
+      },
+      "Zone2":{
+         "AlsaName":"LivingRoom",
+         "MAC":"00:01:02:03:04:06"
+      }
+   }
+}
