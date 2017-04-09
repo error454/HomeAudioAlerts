@@ -29,9 +29,11 @@ type AudioZone struct {
 }
 
 type AudioAlertType struct {
-	LmsIP   string
-	WebPort string
-	Zones   map[string]AudioZone
+	LmsIP       string
+	WebPort     string
+	AudioIntro  string
+	AudioWakeup string
+	Zones       map[string]AudioZone
 }
 
 var config AudioAlertType
@@ -160,18 +162,18 @@ func server(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Play the audio
-	playAudioInZones(audioPath, alertZones)
+	orchestrateAudioInZones(audioPath, alertZones)
 }
 
-func playAudioInZone(audio string, zone string) {
+func playAudioInZone(audio string, zone string, preSleep int, postSleep int) {
 	fmt.Println("Playing audio for zone: " + zone + " Alsa Name: " + config.Zones[zone].AlsaName)
 	cmd := "mpg123"
 	args := []string{"-a", config.Zones[zone].AlsaName, audio}
 
 	fmt.Println("Executing audio command")
-	time.Sleep(time.Second * 1)
+	time.Sleep(time.Second * time.Duration(preSleep))
 	exec.Command(cmd, args...).Run()
-	time.Sleep(time.Second * 1)
+	time.Sleep(time.Second * time.Duration(postSleep))
 }
 
 type zoneState struct {
@@ -218,7 +220,24 @@ func fadeAudioZone(dimZone zoneState, fadeUp bool, wg *sync.WaitGroup) {
 	}()
 }
 
-func playAudioInZones(audio string, zones []string) {
+func playAudioInZones(audio string, zones []string, preSleep int, postSleep int) {
+	var wg sync.WaitGroup
+
+	if _, err := os.Stat(audio); os.IsNotExist(err) {
+	} else {
+		for zone := range zones {
+			wg.Add(1)
+			zonename := zones[zone]
+			go func() {
+				playAudioInZone(audio, zonename, preSleep, postSleep)
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+	}
+}
+
+func orchestrateAudioInZones(audio string, zones []string) {
 	var wg sync.WaitGroup
 
 	// remove any zones that are in an invalid state
@@ -233,18 +252,11 @@ func playAudioInZones(audio string, zones []string) {
 	// Wait for all goroutines to finish dimming/pausing their audio
 	wg.Wait()
 
-	// Play all audio in all zones simultaneously
-	for zone := range validzones {
-		wg.Add(1)
-		zonename := validzones[zone]
-		go func() {
-			playAudioInZone(audio, zonename)
-			wg.Done()
-		}()
-	}
-
-	// Wait for all goroutines to finish playing their audio
-	wg.Wait()
+	// Play Wakeup audio to give amplifier time to warm up. Play audio intro and
+	// then the actual audio.
+	playAudioInZones(config.AudioWakeup, validzones, 0, 1)
+	playAudioInZones(config.AudioIntro, validzones, 0, 0)
+	playAudioInZones(audio, validzones, 1, 1)
 
 	// If the zone was previously playing, unpause it and restore the volume level
 	for zone := range dimZones {
@@ -257,6 +269,8 @@ func playAudioInZones(audio string, zones []string) {
 func main() {
 	e := readConfigFromDisk("config")
 	check(e)
+	fmt.Println("Intro audio is: " + config.AudioIntro)
+	fmt.Println("Wakeup audio is: " + config.AudioWakeup)
 	lms.Connect(config.LmsIP)
 	fmt.Println("Starting http server on port " + config.WebPort)
 	http.HandleFunc("/", server)
